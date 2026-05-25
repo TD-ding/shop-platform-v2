@@ -3,6 +3,7 @@ let currentUser = null;
 let token = null;
 let allProducts = [];
 let currentPage = 'home';
+let isLoading = false;
 
 // --- 工具函数 ---
 function api(method, url, data) {
@@ -20,6 +21,22 @@ function showToast(msg, type = 'success') {
   t.textContent = msg;
   t.className = 'toast show ' + type;
   setTimeout(() => { t.className = 'toast'; }, 2500);
+}
+
+function showLoading(show) {
+  isLoading = show;
+  let loader = document.getElementById('global-loader');
+  if (!loader) {
+    loader = document.createElement('div');
+    loader.id = 'global-loader';
+    loader.style.cssText = 'position:fixed;top:60px;left:0;right:0;height:3px;z-index:999;overflow:hidden;pointer-events:none';
+    loader.innerHTML = '<div style="width:40%;height:100%;background:#4f46e5;animation:loader-bar 1s ease infinite"></div>';
+    document.body.appendChild(loader);
+    const style = document.createElement('style');
+    style.textContent = '@keyframes loader-bar{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}';
+    document.head.appendChild(style);
+  }
+  loader.style.display = show ? '' : 'none';
 }
 
 function navigate(page) {
@@ -48,19 +65,43 @@ function showAuth(mode) {
   if (mode === 'login') {
     form.innerHTML = `
       <h3>登录</h3>
-      <div class="form-group"><label>用户名</label><input type="text" id="login-user"></div>
-      <div class="form-group"><label>密码</label><input type="password" id="login-pass"></div>
-      <button class="btn btn-primary" style="width:100%" onclick="doLogin()">登录</button>
+      <div class="form-group"><label>用户名</label><input type="text" id="login-user" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <div class="form-group">
+        <label>密码</label>
+        <div style="position:relative">
+          <input type="password" id="login-pass" onkeydown="if(event.key==='Enter')doLogin()">
+          <span class="toggle-pwd" onclick="togglePwd('login-pass', this)">👁</span>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="doLogin()" id="login-btn">登录</button>
       <p style="margin-top:12px;text-align:center;font-size:13px;color:#888">没有账号？<a href="#" onclick="showAuth('register');return false">注册一个</a></p>
+      <p style="margin-top:8px;text-align:center;font-size:12px;color:#aaa">测试账号: admin/admin123 · superuser/super123 · user1/user123</p>
     `;
   } else {
     form.innerHTML = `
       <h3>注册</h3>
-      <div class="form-group"><label>用户名</label><input type="text" id="reg-user"></div>
-      <div class="form-group"><label>密码（至少6位）</label><input type="password" id="reg-pass"></div>
-      <button class="btn btn-primary" style="width:100%" onclick="doRegister()">注册</button>
+      <div class="form-group"><label>用户名（字母、数字、下划线、中文）</label><input type="text" id="reg-user" onkeydown="if(event.key==='Enter')doRegister()"></div>
+      <div class="form-group">
+        <label>密码（至少6位）</label>
+        <div style="position:relative">
+          <input type="password" id="reg-pass" onkeydown="if(event.key==='Enter')doRegister()">
+          <span class="toggle-pwd" onclick="togglePwd('reg-pass', this)">👁</span>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="doRegister()" id="reg-btn">注册</button>
       <p style="margin-top:12px;text-align:center;font-size:13px;color:#888">已有账号？<a href="#" onclick="showAuth('login');return false">去登录</a></p>
     `;
+  }
+}
+
+function togglePwd(inputId, el) {
+  const input = document.getElementById(inputId);
+  if (input.type === 'password') {
+    input.type = 'text';
+    el.textContent = '🔒';
+  } else {
+    input.type = 'password';
+    el.textContent = '👁';
   }
 }
 
@@ -69,20 +110,26 @@ function closeAuth() {
 }
 
 async function doLogin() {
+  const btn = document.getElementById('login-btn');
+  btn.textContent = '登录中...';
+  btn.disabled = true;
   const username = document.getElementById('login-user').value.trim();
   const password = document.getElementById('login-pass').value;
   const res = await api('POST', '/api/login', { username, password });
-  if (res.error) { showToast(res.error, 'error'); return; }
+  if (res.error) { showToast(res.error, 'error'); btn.textContent = '登录'; btn.disabled = false; return; }
   token = res.token;
   currentUser = res.user;
   onLoginSuccess();
 }
 
 async function doRegister() {
+  const btn = document.getElementById('reg-btn');
+  btn.textContent = '注册中...';
+  btn.disabled = true;
   const username = document.getElementById('reg-user').value.trim();
   const password = document.getElementById('reg-pass').value;
   const res = await api('POST', '/api/register', { username, password });
-  if (res.error) { showToast(res.error, 'error'); return; }
+  if (res.error) { showToast(res.error, 'error'); btn.textContent = '注册'; btn.disabled = false; return; }
   token = res.token;
   currentUser = res.user;
   onLoginSuccess();
@@ -143,7 +190,9 @@ async function updateCartBadge() {
 // --- 商品 ---
 async function loadProducts() {
   if (!currentUser) { showToast('请先登录', 'error'); return; }
+  showLoading(true);
   const res = await api('GET', '/api/products');
+  showLoading(false);
   if (Array.isArray(res)) {
     allProducts = res;
     renderProducts(res);
@@ -161,7 +210,7 @@ function filterProducts() {
   const search = document.getElementById('search-input').value.toLowerCase();
   const cat = document.getElementById('category-filter').value;
   let filtered = allProducts;
-  if (search) filtered = filtered.filter(p => p.name.toLowerCase().includes(search) || p.description.toLowerCase().includes(search));
+  if (search) filtered = filtered.filter(p => p.name.toLowerCase().includes(search) || (p.description && p.description.toLowerCase().includes(search)));
   if (cat) filtered = filtered.filter(p => p.category === cat);
   renderProducts(filtered);
 }
@@ -179,14 +228,15 @@ function renderProducts(products) {
     if (p.originalPrice) {
       priceHtml = '<span class="price">&yen;' + p.price.toFixed(2) + '</span><span class="original-price">&yen;' + p.originalPrice.toFixed(2) + '</span>';
     }
+    const stockColor = p.stock <= 5 ? 'color:#ef4444' : '';
     return `
       <div class="product-card">
         <div class="product-img">${icon}</div>
         ${p.is_special ? '<span class="special-badge">VIP专属</span>' : ''}
         ${p.category ? '<span class="category-tag">' + p.category + '</span>' : ''}
-        <h4>${p.name}</h4>
-        <p class="desc">${p.description}</p>
-        <p class="stock">库存: ${p.stock}</p>
+        <h4>${escapeHtmlFE(p.name)}</h4>
+        <p class="desc">${escapeHtmlFE(p.description || '')}</p>
+        <p class="stock" style="${stockColor}">库存: ${p.stock}${p.stock <= 5 && p.stock > 0 ? ' (仅剩' + p.stock + '件)' : ''}${p.stock === 0 ? ' 已售罄' : ''}</p>
         <div class="price-row">
           ${priceHtml}
           <button class="btn btn-sm btn-primary" onclick="addToCart(${p.id})" ${p.stock === 0 ? 'disabled' : ''}>
@@ -198,6 +248,13 @@ function renderProducts(products) {
   }).join('');
 }
 
+// 前端 XSS 防护
+function escapeHtmlFE(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 async function addToCart(productId) {
   const res = await api('POST', '/api/cart', { product_id: productId });
   if (res.error) { showToast(res.error, 'error'); return; }
@@ -207,10 +264,12 @@ async function addToCart(productId) {
 
 // --- 购物车 ---
 async function loadCart() {
+  showLoading(true);
   const res = await api('GET', '/api/cart');
+  showLoading(false);
   const content = document.getElementById('cart-content');
   if (!res.items || res.items.length === 0) {
-    content.innerHTML = '<div class="empty-state"><div class="icon">🛒</div><p>购物车是空的</p></div>';
+    content.innerHTML = '<div class="empty-state"><div class="icon">🛒</div><p>购物车是空的，去 <a href="#" onclick="navigate(\'products\');return false">逛逛</a> 吧</p></div>';
     return;
   }
   let html = res.items.map(item => {
@@ -219,11 +278,11 @@ async function loadCart() {
     return `
       <div class="cart-item">
         <div class="item-info">
-          <h4>${item.name}</h4>
-          <span class="stock">&yen;${item.price.toFixed(2)}/件</span>
+          <h4>${escapeHtmlFE(item.name)}</h4>
+          <span class="stock">&yen;${item.price.toFixed(2)}/件${item.originalPrice ? ' (VIP价)' : ''}</span>
         </div>
         <div class="item-qty">
-          <button onclick="changeQty(${item.id}, ${item.quantity - 1})">-</button>
+          <button onclick="changeQty(${item.id}, ${item.quantity - 1})" ${item.quantity <= 1 ? 'disabled' : ''}>-</button>
           <span>${item.quantity}</span>
           <button onclick="changeQty(${item.id}, ${item.quantity + 1})">+</button>
         </div>
@@ -236,7 +295,8 @@ async function loadCart() {
   html += `
     <div class="cart-summary">
       <p>合计: <span class="total">&yen;${res.total.toFixed(2)}</span></p>
-      <button class="btn btn-primary" onclick="checkout()">结算下单</button>
+      ${currentUser && currentUser.role === 'super' ? '<p style="font-size:13px;color:#ca8a04">已享超级用户 8.5 折优惠</p>' : ''}
+      <button class="btn btn-primary btn-lg" onclick="checkout()">结算下单</button>
     </div>
   `;
   content.innerHTML = html;
@@ -259,7 +319,10 @@ async function removeFromCart(cartId) {
 }
 
 async function checkout() {
+  if (!confirm('确认下单？')) return;
+  showLoading(true);
   const res = await api('POST', '/api/orders');
+  showLoading(false);
   if (res.error) { showToast(res.error, 'error'); return; }
   showToast('下单成功！订单号: ' + res.orderId);
   updateCartBadge();
@@ -268,7 +331,9 @@ async function checkout() {
 
 // --- 订单 ---
 async function loadOrders() {
+  showLoading(true);
   const res = await api('GET', '/api/orders');
+  showLoading(false);
   const content = document.getElementById('orders-content');
   if (!Array.isArray(res) || res.length === 0) {
     content.innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>暂无订单</p></div>';
@@ -280,13 +345,13 @@ async function loadOrders() {
       <div class="order-header">
         <span class="order-id">订单 #${order.id}</span>
         <span class="order-date">${new Date(order.created_at).toLocaleString('zh-CN')}</span>
-        ${order.username ? '<span>用户: ' + order.username + '</span>' : ''}
+        ${order.username ? '<span>用户: ' + escapeHtmlFE(order.username) + '</span>' : ''}
         <span class="status-tag status-${order.status}">${statusNames[order.status]}</span>
       </div>
       <div class="order-items">
         ${order.items.map(i => `
           <div class="order-item">
-            <span>${i.product_name} x${i.quantity}</span>
+            <span>${escapeHtmlFE(i.product_name)} x${i.quantity}</span>
             <span>&yen;${(i.price * i.quantity).toFixed(2)}</span>
           </div>
         `).join('')}
@@ -334,11 +399,11 @@ async function loadAdminProducts() {
       <tbody>
         ${res.map(p => `
           <tr>
-            <td>${p.id}</td><td>${p.name}</td><td>&yen;${p.price.toFixed(2)}</td>
-            <td>${p.stock}</td><td>${p.category || '-'}</td>
-            <td>${p.is_special ? '是' : '否'}</td>
+            <td>${p.id}</td><td>${escapeHtmlFE(p.name)}</td><td>&yen;${p.price.toFixed(2)}</td>
+            <td>${p.stock}</td><td>${escapeHtmlFE(p.category || '-')}</td>
+            <td>${p.is_special ? '✅' : '—'}</td>
             <td>
-              <button class="btn btn-sm" onclick='editProduct(${JSON.stringify(p).replace(/'/g, "\\'")})'>编辑</button>
+              <button class="btn btn-sm" onclick='editProduct(${JSON.stringify(p).replace(/'/g, "&#39;")})'>编辑</button>
               <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">删除</button>
             </td>
           </tr>
@@ -411,7 +476,7 @@ async function loadAdminUsers() {
       <tbody>
         ${res.map(u => `
           <tr>
-            <td>${u.id}</td><td>${u.username}</td>
+            <td>${u.id}</td><td>${escapeHtmlFE(u.username)}</td>
             <td><span class="role-tag role-${u.role}">${roleNames[u.role]}</span></td>
             <td>${new Date(u.created_at).toLocaleString('zh-CN')}</td>
             <td>
@@ -456,7 +521,7 @@ async function loadAdminOrders() {
       <tbody>
         ${res.map(o => `
           <tr>
-            <td>#${o.id}</td><td>${o.username || '-'}</td>
+            <td>#${o.id}</td><td>${escapeHtmlFE(o.username || '-')}</td>
             <td>&yen;${o.total_price.toFixed(2)}</td>
             <td><span class="status-tag status-${o.status}">${statusNames[o.status]}</span></td>
             <td>${new Date(o.created_at).toLocaleString('zh-CN')}</td>

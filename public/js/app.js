@@ -557,6 +557,21 @@ async function changeOrderStatus(orderId, status) {
   loadAdminStats();
 }
 
+// --- 修改密码 ---
+async function changePassword() {
+  const oldPassword = document.getElementById('pwd-old').value;
+  const newPassword = document.getElementById('pwd-new').value;
+  const confirmPwd = document.getElementById('pwd-confirm').value;
+  if (!oldPassword || !newPassword || !confirmPwd) { showToast('请填写所有字段', 'error'); return; }
+  if (newPassword !== confirmPwd) { showToast('两次输入的新密码不一致', 'error'); return; }
+  if (newPassword.length < 6) { showToast('新密码至少6位', 'error'); return; }
+  const res = await api('PUT', '/api/me/password', { oldPassword, newPassword });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast('密码修改成功，请重新登录');
+  document.getElementById('pwd-modal').style.display = 'none';
+  logout();
+}
+
 // --- 初始化 ---
 function init() {
   const savedToken = localStorage.getItem('token');

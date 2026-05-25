@@ -8,10 +8,41 @@ const { run, all, get, initDatabase } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'shop-platform-secret-key';
+const SUPER_DISCOUNT = 0.85;
 
 app.use(cors());
-app.use(express.json());
+// 限制请求体大小，防止恶意大请求
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// 简易限流：同一 IP 每分钟最多 60 次请求
+const rateLimiter = new Map();
+app.use((req, res, next) => {
+  const ip = req.ip;
+  const now = Date.now();
+  const record = rateLimiter.get(ip) || { count: 0, start: now };
+  if (now - record.start > 60000) {
+    record.count = 0;
+    record.start = now;
+  }
+  record.count++;
+  rateLimiter.set(ip, record);
+  if (record.count > 60) {
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  }
+  next();
+});
+
+// 超级用户折扣计算
+function applyDiscount(price) {
+  return Math.round(price * SUPER_DISCOUNT * 100) / 100;
+}
+
+// XSS 防护：转义用户输入中的特殊字符
+function escapeHtml(str) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 // --- JWT 中间件 ---
 function authMiddleware(req, res, next) {
@@ -40,8 +71,9 @@ app.post('/api/register', async (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: '用户名和密码不能为空' });
   }
-  if (username.length < 2 || username.length > 20) {
-    return res.status(400).json({ error: '用户名长度需要2-20个字符' });
+  // 只允许字母数字和下划线
+  if (!/^[a-zA-Z0-9_一-龥]{2,20}$/.test(username)) {
+    return res.status(400).json({ error: '用户名只能包含字母、数字、下划线和中文，长度2-20' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: '密码至少6个字符' });
@@ -84,17 +116,17 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 // --- 商品 API ---
 app.get('/api/products', authMiddleware, async (req, res) => {
   try {
-    let products;
-    // 超级用户和管理员可以看到特殊商品
-    if (req.user.role === 'super' || req.user.role === 'admin') {
-      products = await all('SELECT * FROM products ORDER BY created_at DESC');
-    } else {
-      // 普通用户只看到非特殊商品
-      products = await all('SELECT * FROM products WHERE is_special = 0 ORDER BY created_at DESC');
-    }
-    // 超级用户看到自动8.5折
+    const { search, category } = req.query;
+    const canSeeSpecial = req.user.role === 'super' || req.user.role === 'admin';
+    // 构建查询条件
+    let where = canSeeSpecial ? '1=1' : 'is_special = 0';
+    const params = [];
+    if (search) { where += ' AND (name LIKE ? OR description LIKE ?)'; params.push('%' + search + '%', '%' + search + '%'); }
+    if (category) { where += ' AND category = ?'; params.push(category); }
+    const products = await all('SELECT * FROM products WHERE ' + where + ' ORDER BY created_at DESC', params);
+    // 超级用户看到自动折扣
     if (req.user.role === 'super') {
-      products = products.map(p => ({ ...p, originalPrice: p.price, price: Math.round(p.price * 0.85 * 100) / 100 }));
+      products.forEach(p => { p.originalPrice = p.price; p.price = applyDiscount(p.price); });
     }
     res.json(products);
   } catch (err) {
@@ -111,7 +143,7 @@ app.get('/api/products/:id', authMiddleware, async (req, res) => {
     }
     if (req.user.role === 'super') {
       product.originalPrice = product.price;
-      product.price = Math.round(product.price * 0.85 * 100) / 100;
+      product.price = applyDiscount(product.price);
     }
     res.json(product);
   } catch (err) {
@@ -171,7 +203,7 @@ app.get('/api/cart', authMiddleware, async (req, res) => {
     if (req.user.role === 'super') {
       items.forEach(item => {
         item.originalPrice = item.price;
-        item.price = Math.round(item.price * 0.85 * 100) / 100;
+        item.price = applyDiscount(item.price);
       });
     }
     const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -245,7 +277,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     let total = 0;
     const orderItems = cartItems.map(item => {
       let price = item.price;
-      if (req.user.role === 'super') price = Math.round(price * 0.85 * 100) / 100;
+      if (req.user.role === 'super') price = applyDiscount(price);
       total += price * item.quantity;
       return { ...item, finalPrice: price };
     });
@@ -280,6 +312,24 @@ app.get('/api/orders', authMiddleware, async (req, res) => {
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: '获取订单失败' });
+  }
+});
+
+// 用户取消自己的待支付订单
+app.put('/api/orders/:id/cancel', authMiddleware, async (req, res) => {
+  try {
+    const order = await get('SELECT * FROM orders WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    if (!order) return res.status(404).json({ error: '订单不存在' });
+    if (order.status !== 'pending') return res.status(400).json({ error: '只能取消待支付订单' });
+    // 恢复库存
+    const items = await all('SELECT product_id, quantity FROM order_items WHERE order_id = ?', [order.id]);
+    for (const item of items) {
+      await run('UPDATE products SET stock = stock + ? WHERE id = ?', [item.quantity, item.product_id]);
+    }
+    await run('UPDATE orders SET status = ? WHERE id = ?', ['cancelled', req.params.id]);
+    res.json({ message: '订单已取消' });
+  } catch (err) {
+    res.status(500).json({ error: '取消订单失败' });
   }
 });
 
@@ -352,6 +402,17 @@ app.get('/api/stats', authMiddleware, roleMiddleware('admin'), async (req, res) 
   } catch (err) {
     res.status(500).json({ error: '获取统计数据失败' });
   }
+});
+
+// 全局错误兜底
+app.use((err, req, res, _next) => {
+  console.error('Unhandled error:', err.message);
+  res.status(500).json({ error: '服务器内部错误' });
+});
+
+// 健康检查端点
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // 启动服务器

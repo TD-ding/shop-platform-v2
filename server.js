@@ -113,6 +113,35 @@ app.get('/api/me', authMiddleware, async (req, res) => {
   res.json(user);
 });
 
+// 修改密码
+app.put('/api/me/password', authMiddleware, async (req, res) => {
+  const { oldPassword, newPassword } = req.body;
+  if (!oldPassword || !newPassword) return res.status(400).json({ error: '请输入旧密码和新密码' });
+  if (newPassword.length < 6) return res.status(400).json({ error: '新密码至少6位' });
+  try {
+    const user = await get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    const valid = await bcrypt.compare(oldPassword, user.password);
+    if (!valid) return res.status(400).json({ error: '旧密码不正确' });
+    const hash = await bcrypt.hash(newPassword, 10);
+    await run('UPDATE users SET password = ? WHERE id = ?', [hash, req.user.id]);
+    res.json({ message: '密码修改成功' });
+  } catch (err) {
+    res.status(500).json({ error: '修改密码失败' });
+  }
+});
+
+// 商品分类列表
+app.get('/api/categories', authMiddleware, async (req, res) => {
+  try {
+    const canSeeSpecial = req.user.role === 'super' || req.user.role === 'admin';
+    const where = canSeeSpecial ? '' : 'WHERE is_special = 0';
+    const rows = await all('SELECT category, COUNT(*) as count FROM products ' + where + ' GROUP BY category ORDER BY category');
+    res.json(rows.filter(r => r.category));
+  } catch (err) {
+    res.status(500).json({ error: '获取分类失败' });
+  }
+});
+
 // --- 商品 API ---
 app.get('/api/products', authMiddleware, async (req, res) => {
   try {

@@ -347,6 +347,7 @@ async function loadOrders() {
         <span class="order-date">${new Date(order.created_at).toLocaleString('zh-CN')}</span>
         ${order.username ? '<span>用户: ' + escapeHtmlFE(order.username) + '</span>' : ''}
         <span class="status-tag status-${order.status}">${statusNames[order.status]}</span>
+        ${!order.username && order.status === 'pending' ? '<button class="btn btn-sm btn-danger" onclick="cancelOrder(' + order.id + ')">取消订单</button>' : ''}
       </div>
       <div class="order-items">
         ${order.items.map(i => `
@@ -362,6 +363,14 @@ async function loadOrders() {
 }
 
 // --- 管理后台 ---
+async function cancelOrder(orderId) {
+  if (!confirm('确定取消该订单？库存将恢复。')) return;
+  const res = await api('PUT', '/api/orders/' + orderId + '/cancel');
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast('订单已取消');
+  loadOrders();
+}
+
 async function loadAdmin() {
   if (currentUser.role !== 'admin') { navigate('home'); return; }
   loadAdminStats();

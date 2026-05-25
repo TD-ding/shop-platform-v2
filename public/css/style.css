@@ -605,6 +605,17 @@ body {
 .toast.success { background: #059669; }
 .toast.error { background: #dc2626; }
 
+/* 密码显示切换 */
+.toggle-pwd {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  font-size: 16px;
+  user-select: none;
+}
+
 /* 响应式 */
 @media (max-width: 768px) {
   #navbar {

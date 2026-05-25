@@ -44,6 +44,9 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// 导出供其他模块使用
+module.exports.escapeHtml = escapeHtml;
+
 // --- JWT 中间件 ---
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
@@ -85,8 +88,8 @@ app.post('/api/register', async (req, res) => {
     const result = await run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', [username, hash, 'user']);
     const token = jwt.sign({ id: result.lastID, username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: result.lastID, username, role: 'user' } });
-  } catch (err) {
-    res.status(500).json({ error: '注册失败：' + err.message });
+  } catch (_err) {
+    res.status(500).json({ error: '注册失败：' + _err.message });
   }
 });
 
@@ -102,8 +105,8 @@ app.post('/api/login', async (req, res) => {
     if (!valid) return res.status(400).json({ error: '用户名或密码错误' });
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
-  } catch (err) {
-    res.status(500).json({ error: '登录失败：' + err.message });
+  } catch (_err) {
+    res.status(500).json({ error: '登录失败：' + _err.message });
   }
 });
 
@@ -125,7 +128,7 @@ app.put('/api/me/password', authMiddleware, async (req, res) => {
     const hash = await bcrypt.hash(newPassword, 10);
     await run('UPDATE users SET password = ? WHERE id = ?', [hash, req.user.id]);
     res.json({ message: '密码修改成功' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '修改密码失败' });
   }
 });
@@ -137,7 +140,7 @@ app.get('/api/categories', authMiddleware, async (req, res) => {
     const where = canSeeSpecial ? '' : 'WHERE is_special = 0';
     const rows = await all('SELECT category, COUNT(*) as count FROM products ' + where + ' GROUP BY category ORDER BY category');
     res.json(rows.filter(r => r.category));
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '获取分类失败' });
   }
 });
@@ -158,7 +161,7 @@ app.get('/api/products', authMiddleware, async (req, res) => {
       products.forEach(p => { p.originalPrice = p.price; p.price = applyDiscount(p.price); });
     }
     res.json(products);
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '获取商品列表失败' });
   }
 });
@@ -175,7 +178,7 @@ app.get('/api/products/:id', authMiddleware, async (req, res) => {
       product.price = applyDiscount(product.price);
     }
     res.json(product);
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '获取商品详情失败' });
   }
 });
@@ -190,7 +193,7 @@ app.post('/api/products', authMiddleware, roleMiddleware('admin'), async (req, r
       [name, description || '', price, stock || 0, category || '', is_special ? 1 : 0]
     );
     res.json({ id: result.lastID, message: '商品创建成功' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '创建商品失败' });
   }
 });
@@ -206,7 +209,7 @@ app.put('/api/products/:id', authMiddleware, roleMiddleware('admin'), async (req
         stock ?? product.stock, category ?? product.category, is_special !== undefined ? (is_special ? 1 : 0) : product.is_special, req.params.id]
     );
     res.json({ message: '商品更新成功' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '更新商品失败' });
   }
 });
@@ -216,7 +219,7 @@ app.delete('/api/products/:id', authMiddleware, roleMiddleware('admin'), async (
     const result = await run('DELETE FROM products WHERE id = ?', [req.params.id]);
     if (result.changes === 0) return res.status(404).json({ error: '商品不存在' });
     res.json({ message: '商品删除成功' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '删除商品失败' });
   }
 });
@@ -237,7 +240,7 @@ app.get('/api/cart', authMiddleware, async (req, res) => {
     }
     const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
     res.json({ items, total: Math.round(total * 100) / 100 });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '获取购物车失败' });
   }
 });
@@ -258,7 +261,7 @@ app.post('/api/cart', authMiddleware, async (req, res) => {
       [req.user.id, product_id, qty, qty]
     );
     res.json({ message: '已加入购物车' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '加入购物车失败' });
   }
 });
@@ -273,7 +276,7 @@ app.put('/api/cart/:id', authMiddleware, async (req, res) => {
     if (quantity > product.stock) return res.status(400).json({ error: '库存不足' });
     await run('UPDATE cart_items SET quantity = ? WHERE id = ?', [quantity, req.params.id]);
     res.json({ message: '数量已更新' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '更新购物车失败' });
   }
 });
@@ -283,7 +286,7 @@ app.delete('/api/cart/:id', authMiddleware, async (req, res) => {
     const result = await run('DELETE FROM cart_items WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (result.changes === 0) return res.status(404).json({ error: '购物车项不存在' });
     res.json({ message: '已从购物车移除' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '移除失败' });
   }
 });
@@ -321,8 +324,8 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     // 清空购物车
     await run('DELETE FROM cart_items WHERE user_id = ?', [req.user.id]);
     res.json({ orderId: orderResult.lastID, message: '下单成功', totalPrice: Math.round(total * 100) / 100 });
-  } catch (err) {
-    res.status(500).json({ error: '下单失败：' + err.message });
+  } catch (_err) {
+    res.status(500).json({ error: '下单失败：' + _err.message });
   }
 });
 
@@ -339,7 +342,7 @@ app.get('/api/orders', authMiddleware, async (req, res) => {
       order.items = await all('SELECT * FROM order_items WHERE order_id = ?', [order.id]);
     }
     res.json(orders);
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '获取订单失败' });
   }
 });
@@ -357,7 +360,7 @@ app.put('/api/orders/:id/cancel', authMiddleware, async (req, res) => {
     }
     await run('UPDATE orders SET status = ? WHERE id = ?', ['cancelled', req.params.id]);
     res.json({ message: '订单已取消' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '取消订单失败' });
   }
 });
@@ -370,7 +373,7 @@ app.put('/api/orders/:id/status', authMiddleware, roleMiddleware('admin'), async
     const result = await run('UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id]);
     if (result.changes === 0) return res.status(404).json({ error: '订单不存在' });
     res.json({ message: '订单状态已更新' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '更新订单状态失败' });
   }
 });
@@ -380,7 +383,7 @@ app.get('/api/users', authMiddleware, roleMiddleware('admin'), async (req, res) 
   try {
     const users = await all('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC');
     res.json(users);
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '获取用户列表失败' });
   }
 });
@@ -394,7 +397,7 @@ app.put('/api/users/:id/role', authMiddleware, roleMiddleware('admin'), async (r
     const result = await run('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
     if (result.changes === 0) return res.status(404).json({ error: '用户不存在' });
     res.json({ message: '用户角色已更新' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '更新用户角色失败' });
   }
 });
@@ -410,7 +413,7 @@ app.delete('/api/users/:id', authMiddleware, roleMiddleware('admin'), async (req
     const result = await run('DELETE FROM users WHERE id = ?', [req.params.id]);
     if (result.changes === 0) return res.status(404).json({ error: '用户不存在' });
     res.json({ message: '用户已删除' });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '删除用户失败' });
   }
 });
@@ -428,14 +431,14 @@ app.get('/api/stats', authMiddleware, roleMiddleware('admin'), async (req, res) 
       orders: orderCount.count,
       revenue: revenue.total
     });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: '获取统计数据失败' });
   }
 });
 
 // 全局错误兜底
 app.use((err, req, res, _next) => {
-  console.error('Unhandled error:', err.message);
+  console.error('Unhandled error:', _err.message);
   res.status(500).json({ error: '服务器内部错误' });
 });
 

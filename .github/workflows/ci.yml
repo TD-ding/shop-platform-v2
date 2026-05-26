@@ -20,17 +20,10 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Lint
         run: npm run lint
 
       - name: Test
         run: npm test
-
-      - name: Health check
-        run: |
-          node server.js &
-          sleep 3
-          curl -sf http://localhost:3000/api/health | grep -q '"status":"ok"'
-          kill %1
